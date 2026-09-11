@@ -1,0 +1,148 @@
+// Schema decisions (explained fully in README):
+// - ActivityLog is a persisted table, not derived from TaskStatusHistory, so the
+//   feed and the catchup query hit the same source of truth.
+// - Indexes are placed on every column that a filter or a WHERE clause in the
+//   permission logic touches: projectId, assignedToId, status, dueDate, createdById.
+// - onDelete: Cascade on Task->Project and ActivityLog->Project so deleting a
+//   project doesn't orphan rows that role-filtering queries assume exist.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  PM
+  DEVELOPER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  projectsCreated   Project[]        @relation("ProjectCreatedBy")
+  tasksAssigned     Task[]           @relation("TaskAssignee")
+  activityEvents    ActivityLog[]    @relation("ActivityActor")
+  notifications     Notification[]
+  taskStatusChanges TaskStatusLog[]  @relation("StatusChangedBy")
+
+  @@index([role])
+}
+
+model Client {
+  id        String    @id @default(uuid())
+  name      String
+  createdAt DateTime  @default(now())
+  projects  Project[]
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  client      Client   @relation(fields: [clientId], references: [id])
+  clientId    String
+  createdBy   User     @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  createdById String
+  createdAt   DateTime @default(now())
+
+  tasks         Task[]
+  activityLogs  ActivityLog[]
+
+  // PM's "my projects only" filter runs on createdById constantly
+  @@index([createdById])
+  @@index([clientId])
+}
+
+model Task {
+  id           String       @id @default(uuid())
+  title        String
+  description  String?
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId    String
+  assignee     User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  assigneeId   String?
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  dueDate      DateTime?
+  isOverdue    Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  statusLogs    TaskStatusLog[]
+  notifications Notification[]
+
+  // every filter (status, priority, due range) and every RBAC scope
+  // (assigneeId, projectId) queried against this table directly
+  @@index([projectId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([isOverdue])
+}
+
+model TaskStatusLog {
+  id          String     @id @default(uuid())
+  task        Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId      String
+  fromStatus  TaskStatus?
+  toStatus    TaskStatus
+  changedBy   User       @relation("StatusChangedBy", fields: [changedById], references: [id])
+  changedById String
+  changedAt   DateTime   @default(now())
+
+  @@index([taskId])
+}
+
+// Persisted activity feed. Every WebSocket emit also writes a row here,
+// so reconnect-catchup is a plain indexed query, never an in-memory replay.
+model ActivityLog {
+  id        String   @id @default(uuid())
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  actor     User     @relation("ActivityActor", fields: [actorId], references: [id])
+  actorId   String
+  taskId    String?
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId    String?
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
