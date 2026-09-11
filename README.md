@@ -4,6 +4,26 @@ Full-stack internal tool for an agency to manage client projects, assign
 tasks, and watch team activity live. React/TypeScript frontend, Node/Express
 backend, PostgreSQL via Prisma, real-time layer over Socket.io.
 
+## Live demo
+
+- **App:** https://client-project-dashboard-flax.vercel.app
+- **API:** https://dashboard-backend-2dvv.onrender.com
+
+Login with any seeded account, password `Password123!`:
+- Admin: `admin@agency.dev`
+- PM: `rohan.pm@agency.dev`
+- Developer: `dev1@agency.dev`
+
+The backend is hosted on Render's free tier, which spins down after
+inactivity — the first request after a period of idle time can take up to
+~50 seconds to respond while it wakes back up. Subsequent requests are fast.
+
+Deployed as two separate services: the frontend on Vercel, the backend
+(API + WebSocket server) and Postgres database on Render. `CLIENT_ORIGIN`
+on the backend and `VITE_API_URL` / `VITE_SOCKET_URL` on the frontend wire
+the two together — see the Architectural Decisions section below for how
+cross-site auth (CORS + cookies) is handled between the two domains.
+
 ## Local setup (Docker, preferred)
 
 ```bash
@@ -12,8 +32,8 @@ cd project-dashboard
 docker compose up --build
 ```
 
-This starts Postgres, runs the backend (migrations apply automatically on
-container start via `prisma migrate deploy`), and serves the frontend.
+This starts Postgres, builds the database schema on container start via
+`prisma db push`, and serves the frontend.
 
 - API: http://localhost:4000
 - Frontend: http://localhost:5173
@@ -68,6 +88,15 @@ Indexes were placed on every column that either a filter (`status`,
 
 ## Architectural decisions
 
+**Cross-site auth between two separate domains.** The live deploy splits the
+frontend (Vercel) and backend (Render) onto different domains, which
+browsers treat as cross-site. Two things had to change from a same-domain
+setup: the refresh cookie's `SameSite` attribute is `none` (with `secure:
+true`) rather than `lax`, since `lax` cookies are dropped on cross-site
+requests; and CORS trusts any `*.vercel.app` origin dynamically rather than
+a single hardcoded `CLIENT_ORIGIN` string, since Vercel assigns a slightly
+different URL per deploy. See `isAllowedOrigin` in `backend/src/app.ts`.
+
 **Socket.io over raw WebSocket.** The spec allows either. Raw WebSocket
 would mean hand-rolling room-based broadcasting (needed for per-project and
 per-role scoping) and reconnection/backoff handling. Socket.io gives both for
@@ -93,7 +122,7 @@ dataset is ever assembled for a Developer's request in the first place.
 
 **node-cron over Bull for the overdue sweep.** Bull (or BullMQ) earns its
 Redis dependency when you have per-item retry, backoff, and priority
-semantics. The overdue job is a single periodic `UPDATE ... WHERE dueDate <
+semantics. The overdue job is a single periodic `UPDATE ... WHERE dueDate 
 now()` sweep with no per-task failure handling to speak of. Adding a queue
 here would be infrastructure for a problem this doesn't have.
 
