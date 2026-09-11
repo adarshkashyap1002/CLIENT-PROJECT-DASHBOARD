@@ -2,7 +2,7 @@ import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
 import { verifyAccessToken } from "../utils/jwt";
 import { prisma } from "../config/prisma";
-import { env } from "../config/env";
+import { isAllowedOrigin } from "../app";
 
 let io: Server;
 
@@ -13,7 +13,7 @@ const onlineUsers = new Map<string, Set<string>>(); // userId -> set of socketId
 
 export function initSockets(server: HttpServer) {
   io = new Server(server, {
-    cors: { origin: env.clientOrigin, credentials: true },
+    cors: { origin: (origin, callback) => callback(null, isAllowedOrigin(origin)), credentials: true },
   });
 
   // Every socket connection must present a valid access token, same as REST.

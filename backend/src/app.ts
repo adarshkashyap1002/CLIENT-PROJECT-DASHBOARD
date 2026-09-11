@@ -9,10 +9,24 @@ import taskRoutes from "./routes/task.routes";
 import notificationRoutes from "./routes/notification.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) return true;
+  if (origin === "http://localhost:5173") return true;
+  const configured = env.clientOrigin?.trim();
+  if (configured && origin === configured) return true;
+  return false;
+}
+
 export function createApp() {
   const app = express();
 
-  app.use(cors({ origin: env.clientOrigin, credentials: true }));
+  app.use(
+    cors({
+      origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+      credentials: true,
+    })
+  );
   app.use(express.json());
   app.use(cookieParser());
 
@@ -24,9 +38,6 @@ export function createApp() {
   app.use("/api/notifications", notificationRoutes);
   app.use("/api/dashboard", dashboardRoutes);
 
-  // Every route above returns structured JSON errors on failure; this catches
-  // anything that slips through (e.g. a thrown non-AppError) and still never
-  // leaks a stack trace to the client.
   app.use(errorHandler);
 
   return app;
