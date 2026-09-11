@@ -8,10 +8,11 @@ import { AppError } from "../middleware/errorHandler";
 const REFRESH_COOKIE = "refreshToken";
 
 function refreshCookieOptions() {
+  const isProd = env.nodeEnv === "production";
   return {
     httpOnly: true,
-    secure: env.nodeEnv === "production",
-    sameSite: "lax" as const,
+    secure: isProd,
+    sameSite: (isProd ? "none" : "lax") as "none" | "lax",
     maxAge: env.jwt.refreshTtlDays * 24 * 60 * 60 * 1000,
     path: "/api/auth",
   };
@@ -28,8 +29,6 @@ export async function login(req: Request, res: Response) {
   const accessToken = signAccessToken({ userId: user.id, role: user.role });
   const refreshToken = signRefreshToken(user.id);
 
-  // Refresh token never touches JS-readable storage. This is what stops
-  // an XSS payload from exfiltrating a long-lived token.
   res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
   res.json({
     accessToken,
